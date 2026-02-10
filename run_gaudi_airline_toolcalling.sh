@@ -56,6 +56,8 @@ $CTR exec \
     --max-model-len 16384 \
     --tensor-parallel-size 1 \
     --port "$PORT" \
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes \
   > "$SCRATCH_BASE/logs/vllm-$SLURM_JOB_ID.log" 2>&1 &
 
 VLLM_PID=$!
