@@ -2,9 +2,40 @@
 
 import abc
 import enum
+import os
+import itertools
+import threading
 from litellm import completion
 
 from typing import Optional, List, Dict, Any, Union
+
+
+def _build_api_key_cycle():
+    """Build a thread-safe round-robin iterator over Voyager API keys.
+
+    Reads USER_MODEL_API_KEY (single key) or USER_MODEL_API_KEYS (comma-separated).
+    Falls back to None if neither is set.
+    """
+    keys_str = os.getenv("USER_MODEL_API_KEYS", "")  # comma-separated
+    single = os.getenv("USER_MODEL_API_KEY", "")
+    keys = [k.strip() for k in keys_str.split(",") if k.strip()]
+    if not keys and single:
+        keys = [single]
+    if not keys:
+        return None
+    return itertools.cycle(keys)
+
+
+_key_cycle = _build_api_key_cycle()
+_key_lock = threading.Lock()
+
+
+def _next_api_key() -> Optional[str]:
+    """Return the next API key in round-robin order (thread-safe)."""
+    if _key_cycle is None:
+        return None
+    with _key_lock:
+        return next(_key_cycle)
 
 
 class BaseUserSimulationEnv(abc.ABC):
@@ -44,12 +75,32 @@ class LLMUserSimulationEnv(BaseUserSimulationEnv):
         self.reset()
 
     def generate_next_message(self, messages: List[Dict[str, Any]]) -> str:
+        import time as _time
+        api_base = os.getenv("USER_MODEL_API_BASE", None)
+        api_key = _next_api_key()
+
+        _t0 = _time.time()
+        try:
         res = completion(
-            model=self.model, custom_llm_provider=self.provider, messages=messages
-        )
+                model=self.model,
+                custom_llm_provider=self.provider,
+                messages=messages,
+                api_base=api_base,
+                api_key=api_key,
+                timeout=600,
+            )
+        except Exception as e:
+            print(f"[USER-SIM] completion FAILED after {_time.time()-_t0:.1f}s: {e}", flush=True)
+            raise
+        print(f"[USER-SIM] Voyager responded in {_time.time()-_t0:.1f}s", flush=True)
+
         message = res.choices[0].message
         self.messages.append(message.model_dump())
-        self.total_cost = res._hidden_params["response_cost"]
+        self.total_cost = (
+            res._hidden_params.get("response_cost", 0.0)
+            if hasattr(res, "_hidden_params")
+            else 0.0
+        )
         return message.content
 
     def build_system_prompt(self, instruction: Optional[str]) -> str:
@@ -120,7 +171,11 @@ User Response:
         )
         message = res.choices[0].message
         self.messages.append(message.model_dump())
-        self.total_cost = res._hidden_params["response_cost"]
+        self.total_cost = (
+            res._hidden_params.get("response_cost", 0.0)
+            if hasattr(res, "_hidden_params")
+            else 0.0
+        )
         return self.parse_response(message.content)
 
     def reset(self, instruction: Optional[str] = None) -> str:
@@ -168,7 +223,11 @@ class VerifyUserSimulationEnv(LLMUserSimulationEnv):
                 model=self.model, custom_llm_provider=self.provider, messages=messages
             )
             cur_message = res.choices[0].message
-            self.total_cost = res._hidden_params["response_cost"]
+            self.total_cost = (
+                res._hidden_params.get("response_cost", 0.0)
+                if hasattr(res, "_hidden_params")
+                else 0.0
+            )
             if verify(self.model, self.provider, cur_message, messages):
                 self.messages.append(cur_message.model_dump())
                 return cur_message.content

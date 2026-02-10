@@ -43,9 +43,19 @@ class ToolCallingAgent(Agent):
                 custom_llm_provider=self.provider,
                 tools=self.tools_info,
                 temperature=self.temperature,
+                tool_choice="required",
             )
             next_message = res.choices[0].message.model_dump()
-            total_cost += res._hidden_params["response_cost"] or 0
+            # Be robust to missing or None response_cost from litellm
+            if hasattr(res, "_hidden_params"):
+                raw_cost = res._hidden_params.get("response_cost", 0.0)
+                try:
+                    step_cost = float(raw_cost) if raw_cost is not None else 0.0
+                except (TypeError, ValueError):
+                    step_cost = 0.0
+            else:
+                step_cost = 0.0
+            total_cost += step_cost
             action = message_to_action(next_message)
             env_response = env.step(action)
             reward = env_response.reward
