@@ -119,6 +119,154 @@ python run.py --agent-strategy tool-calling --env retail --model gpt-4o --model-
 
 This strategy uses a subsequent LLM verification step to check if the user simulator's response is satisfactory. If not, the user simulator will be prompted to reflect on its response and generate a new response.
 
+## Running on Intel Gaudi (ASU Sol HPC)
+
+This fork adds support for running tau-bench on Intel Gaudi accelerators via SLURM, using Qwen3-32B as the agent model and a Voyager-hosted Qwen3-30B as the user simulator.
+
+### Prerequisites
+
+- Access to a SLURM cluster with Intel Gaudi nodes (e.g., ASU Sol)
+- The vLLM-Gaudi container at `/data/sse/gaudi/containers/vllm-gaudi.sif`
+- A Python virtual environment with `litellm` and tau-bench installed at `/scratch/$USER/tau-bench-venv`
+- Voyager API keys for the user simulation model
+
+### Initial Setup on the Cluster
+
+```bash
+# Clone and install
+cd /scratch/$USER
+git clone https://github.com/kaizen-38/CSE-598-tau_bench.git tau-bench
+cd tau-bench
+
+# Create virtual environment
+python3 -m venv /scratch/$USER/tau-bench-venv
+source /scratch/$USER/tau-bench-venv/bin/activate
+pip install -e .
+pip install litellm
+
+# Create required directories
+mkdir -p logs results
+```
+
+### Submitting Experiments
+
+Each experiment is a self-contained SLURM script that launches a vLLM server on Gaudi, waits for readiness, then runs tau-bench.
+
+```bash
+cd /scratch/$USER/tau-bench
+
+# --- Retail domain ---
+sbatch run_gaudi_retail_react.sh          # ReAct strategy
+sbatch run_gaudi_retail_act.sh            # Act strategy
+sbatch run_gaudi_retail_toolcalling.sh    # Tool-calling strategy
+
+# --- Airline domain ---
+sbatch run_gaudi_airline_react.sh         # ReAct strategy
+sbatch run_gaudi_airline_act.sh           # Act strategy
+sbatch run_gaudi_airline_toolcalling.sh   # Tool-calling strategy
+```
+
+### Experiment Configuration
+
+All scripts share the same defaults (edit the script to change):
+
+| Parameter | Value |
+|-----------|-------|
+| Agent model | `Qwen/Qwen3-32B` (local vLLM on Gaudi) |
+| User model | `qwen3-30b-a3b-instruct-2507` (Voyager API) |
+| Temperature | 0.7 |
+| Num trials | 5 (pass^1 through pass^5) |
+| Concurrency | 6 |
+| Max model length | 16384 |
+| SLURM time limit | 24 hours |
+
+**Note on tool-calling scripts:** The tool-calling strategy requires vLLM to be started with `--enable-auto-tool-choice --tool-call-parser hermes` (already included in the scripts). This is required for Qwen models to handle native tool calling via the OpenAI-compatible API.
+
+### Monitoring Jobs
+
+```bash
+# List your running/pending jobs
+squeue -u $USER
+
+# Watch a job's live output (replace JOBID)
+tail -f logs/tau-gaudi-retail-react-JOBID.out
+
+# Check for errors
+tail -f logs/tau-gaudi-retail-react-JOBID.err
+
+# Cancel a job
+scancel JOBID
+```
+
+### Results
+
+Results are saved as JSON checkpoint files in `results/gaudi-{domain}-{strategy}/`. Each file contains an array of task results with fields:
+
+- `task_id`: the benchmark task number
+- `reward`: 1.0 for pass, 0.0 for fail
+- `trial`: trial number (0-4 for 5 trials)
+- `info`: metadata including error messages if the task failed
+- `traj`: the full conversation trajectory
+
+### Analyzing Results
+
+Use `analyze_failures.py` to inspect results and verify failures are from the benchmark (not infrastructure issues):
+
+```bash
+# Full summary of all ACT & REACT experiments
+python3 analyze_failures.py
+
+# Filter by strategy or domain
+python3 analyze_failures.py --strategy act
+python3 analyze_failures.py --strategy react
+python3 analyze_failures.py --domain airline
+python3 analyze_failures.py --domain retail
+
+# Deep-dive into a specific task across all trials
+python3 analyze_failures.py --task-id 42
+
+# Print task-by-task pass/fail log (like HPC terminal output)
+python3 analyze_failures.py --log --domain retail --strategy act
+python3 analyze_failures.py --log --domain retail --strategy act --trial 0
+
+# Show only trial 0 (pass^1) for airline react
+python3 analyze_failures.py --log --domain airline --strategy react --trial 0
+```
+
+Use `aggregate_results.py` to merge results from multiple runs and check completeness:
+
+```bash
+# Aggregate and check for missing tasks
+python3 aggregate_results.py results/gaudi-airline-act \
+    -o results/agg-airline-act.json \
+    --check-missing --domain airline
+
+python3 aggregate_results.py results/gaudi-retail-react \
+    -o results/agg-retail-react.json \
+    --check-missing --domain retail
+```
+
+### Running Specific Tasks
+
+To re-run only specific task IDs (e.g., to retry infrastructure failures):
+
+```bash
+python run.py \
+    --agent-strategy act \
+    --env airline \
+    --model Qwen/Qwen3-32B \
+    --model-provider openai \
+    --user-model qwen3-30b-a3b-instruct-2507 \
+    --user-model-provider openai \
+    --user-strategy llm \
+    --temperature 0.7 \
+    --num-trials 5 \
+    --task-ids 0 13 22 \
+    --log-dir results/gaudi-airline-act
+```
+
+---
+
 ## Auto error identification
 
 Often times, it is difficult and time consuming to manually identify specific error locations in trajectories as they can be long and the constraints can be complex. We have provided an auto error identification tool that can do the following:
