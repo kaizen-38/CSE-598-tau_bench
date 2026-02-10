@@ -83,11 +83,12 @@ fi
 export OPENAI_API_BASE="http://127.0.0.1:${PORT}/v1"
 export OPENAI_API_KEY="EMPTY"
 
-export USER_MODEL_API_BASE="https://openai.rc.asu.edu/v1"
-# Single key (fallback)
-export USER_MODEL_API_KEY="YOUR_API_KEY_HERE"
-# Comma-separated keys for round-robin throughput
-export USER_MODEL_API_KEYS="YOUR_API_KEY_HERE,YOUR_API_KEY_HERE,YOUR_API_KEY_HERE,YOUR_API_KEY_HERE,YOUR_API_KEY_HERE,YOUR_API_KEY_HERE"
+# Load API keys from .env (USER_MODEL_API_BASE, USER_MODEL_API_KEY, USER_MODEL_API_KEYS)
+if [ -f "$TAU_DIR/.env" ]; then
+  set -a; source "$TAU_DIR/.env"; set +a
+else
+  echo "ERROR: $TAU_DIR/.env not found. Create it with your API keys." >&2; exit 1
+fi
 
 cd "$TAU_DIR"
 
