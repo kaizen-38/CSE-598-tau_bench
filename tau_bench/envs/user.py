@@ -81,7 +81,7 @@ class LLMUserSimulationEnv(BaseUserSimulationEnv):
 
         _t0 = _time.time()
         try:
-        res = completion(
+            res = completion(
                 model=self.model,
                 custom_llm_provider=self.provider,
                 messages=messages,
@@ -90,7 +90,10 @@ class LLMUserSimulationEnv(BaseUserSimulationEnv):
                 timeout=600,
             )
         except Exception as e:
-            print(f"[USER-SIM] completion FAILED after {_time.time()-_t0:.1f}s: {e}", flush=True)
+            print(
+                f"[USER-SIM] completion FAILED after {_time.time()-_t0:.1f}s: {e}",
+                flush=True,
+            )
             raise
         print(f"[USER-SIM] Voyager responded in {_time.time()-_t0:.1f}s", flush=True)
 
