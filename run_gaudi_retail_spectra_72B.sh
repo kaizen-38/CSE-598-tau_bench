@@ -11,7 +11,7 @@
 #SBATCH --gres=gpu:hl225:4
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=240G
-#SBATCH --time=48:00:00
+#SBATCH --time=24:00:00
 #SBATCH -A class_cse59827694spring2026
 #SBATCH --job-name=tau-spectra-72B-retail
 #SBATCH --output=/scratch/%u/tau-bench/logs/%x-%j.out
