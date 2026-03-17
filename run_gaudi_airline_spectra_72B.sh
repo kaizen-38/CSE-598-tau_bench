@@ -1,6 +1,6 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  SPECTRA + Qwen2.5-72B-Instruct — Airline FULL BENCHMARK       ║
+# ║  SPECTRA + Qwen3-8B — Airline FULL BENCHMARK                   ║
 # ║  Multi-agent architecture with deterministic guards + auditor   ║
 # ╚══════════════════════════════════════════════════════════════════╝
 #
@@ -11,18 +11,16 @@
 #   3. SurrenderInterceptor — blocks premature transfers          [free]
 #   4. ResponseConsistencyAuditor — LLM claim verification        [1 call/task]
 #
-# GPU note: Qwen2.5-72B has num_kv_heads=8, so tensor-parallel-size
-# must evenly divide 8.  TP=4 (4 GPUs) is the efficient choice
-# (~144 GB model in bf16 across 4×96 GB Gaudi HL-225 = 384 GB total).
+# GPU note: Qwen3-8B runs on 2 Gaudi HL-225 GPUs with TP=2.
 #
 #SBATCH --partition=gaudi
 #SBATCH --qos=class_gaudi
-#SBATCH --gres=gpu:hl225:4
+#SBATCH --gres=gpu:hl225:2
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=240G
 #SBATCH --time=24:00:00
 #SBATCH -A class_cse59827694spring2026
-#SBATCH --job-name=tau-spectra-72B-airline
+#SBATCH --job-name=tau-spectra-32B-airline
 #SBATCH --output=/scratch/%u/tau-bench/logs/%x-%j.out
 #SBATCH --error=/scratch/%u/tau-bench/logs/%x-%j.err
 
@@ -45,9 +43,9 @@ export XDG_CACHE_HOME="$SCRATCH_BASE/.cache"
 export HABANA_LOGS="$SCRATCH_BASE/habana_logs"
 
 # ── Model configuration ─────────────────────────────────────────────
-AGENT_MODEL="Qwen/Qwen2.5-72B-Instruct"
+AGENT_MODEL="Qwen/Qwen3-8B"
 USER_MODEL="qwen3-30b-a3b-instruct-2507"
-TP_SIZE=4
+TP_SIZE=2
 # ─────────────────────────────────────────────────────────────────────
 
 PORT=$((8000 + SLURM_JOB_ID % 1000))
@@ -60,7 +58,7 @@ $CTR exec --writable-tmpfs \
   --bind /scratch:/scratch \
   --bind /data:/data \
   --bind "$HABANA_LOGS":"$HABANA_LOGS" \
-  --env HABANA_VISIBLE_DEVICES=0,1,2,3 \
+  --env HABANA_VISIBLE_DEVICES=0,1 \
   --env HABANA_LOGS="$HABANA_LOGS" \
   --env HF_HOME="$HF_HOME" \
   --env XDG_CACHE_HOME="$XDG_CACHE_HOME" \
@@ -79,7 +77,7 @@ $CTR exec --writable-tmpfs \
 
 VLLM_PID=$!
 
-echo "Waiting for vLLM readiness (72B load may take 5-10 min)..."
+echo "Waiting for vLLM readiness (8B load may take 2-5 min)..."
 for i in {1..600}; do
   if ! kill -0 "$VLLM_PID" >/dev/null 2>&1; then
     echo "vLLM exited early. Tail of vLLM log:"
@@ -112,7 +110,7 @@ fi
 cd "$TAU_DIR"
 
 VENV_PY="$SCRATCH_BASE/tau-bench-venv/bin/python"
-RESULTS_DIR="$TAU_DIR/results/spectra-72B-airline"
+RESULTS_DIR="$TAU_DIR/results/spectra-32B-airline"
 mkdir -p "$RESULTS_DIR" "$TAU_DIR/logs"
 
 "$VENV_PY" -c "import litellm; print('litellm ok')"
